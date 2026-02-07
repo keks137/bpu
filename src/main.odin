@@ -238,9 +238,18 @@ emu_main :: proc(data: rawptr) {
 
 
 load_and_run_code :: proc(path: string, code: ^Code, thread_handle: ^^thread.Thread) {
-	ok := false
-	code.data, ok = os.read_entire_file(path)
-	assert(ok)
+	err: os.Error
+	code.data, err = os.read_entire_file_or_err(path)
+	if err != nil {
+		help := ""
+		if err == .ENOENT {
+			if path == "output.mcb" {
+				help = "\nPlease supply a file"
+			}
+		}
+		fmt.eprintfln("Error: %s file couldn't be opened: %s %s", err, path, help)
+		os.exit(1)
+	}
 	thread_handle^ = thread.create_and_start_with_data(code, emu_main)
 }
 
@@ -250,12 +259,12 @@ main :: proc() {
 	code.char_buffer = make([]u8, 10)
 	code.print_buffer = make([]u8, 11)
 
-	if (len(os.args) != 2) {
-		fmt.eprintfln(`[ERROR] usage:
-	%s <file>`, os.args[0])
-		os.exit(1)
+	file: string
+	if (len(os.args) < 2) {
+		file = "output.mcb"
+	} else {
+		file = os.args[1]
 	}
-	file := os.args[1]
 
 	emu_thread: ^thread.Thread
 	load_and_run_code(file, &code, &emu_thread)
