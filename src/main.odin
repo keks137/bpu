@@ -1,7 +1,9 @@
 package main
 
 import "core:fmt"
+import "core:mem"
 import "core:os"
+import "core:sync"
 import "core:thread"
 import rl "vendor:raylib"
 
@@ -66,13 +68,76 @@ instr_ldi :: #force_inline proc(regs: []u8, reg: u8, imm: u8) {
 	// fmt.printfln("%i -> r%i", imm, reg)
 	regs[reg] = imm
 }
-instr_adi :: #force_inline proc(regs: []u8, reg: u8, imm: u8) {
-	regs[reg] += imm
+instr_adi :: #force_inline proc(code: ^Code, regs: []u8, reg: u8, imm: u8) {
+	res := regs[reg] + imm
+	code.flags.Z = res == 0
+	code.flags.C = cast(i8)res < 0
+	regs[reg] = res
+
 }
 
 instr_jmp :: #force_inline proc(code: ^Code, data: []u8) {
 	addr: u16 = (((cast(u16)data[0]) & 0x03) << 8) | cast(u16)data[1]
 	code.pc = addr - 1
+}
+
+
+push_char_buffer :: proc(char_buffer: []u8, display_buffer: []u8) {
+	for char, i in char_buffer {
+		switch char {
+		case 0:
+			{
+				display_buffer[i] = ' '
+
+			}
+
+		case 1 ..< 26:
+			{
+				display_buffer[i] = char + 64
+			}
+
+		case 27:
+			display_buffer[i] = '.'
+		case 28:
+			display_buffer[i] = '!'
+		case 29:
+			display_buffer[i] = '?'
+
+		}
+	}
+}
+
+instr_str :: proc(code: ^Code, reg_a: u8, reg_b: u8, pseudo_reg_c: u8) {
+	offset := cast(i8)pseudo_reg_c
+	index := ((cast(i16)code.reg[reg_a]) + cast(i16)offset)
+
+
+	write_char :: 247
+	buffer_chars :: 248
+	clear_chars :: 249
+	switch index {
+	case write_char:
+		{
+
+			code.char_buffer[code.char_buffer_wp] = code.reg[reg_b]
+			code.char_buffer_wp += 1
+			code.char_buffer_wp = code.char_buffer_wp % len(code.char_buffer)
+		}
+	case buffer_chars:
+		{
+			push_char_buffer(code.char_buffer, code.print_buffer)
+		}
+	case clear_chars:
+		{
+			code.char_buffer_wp = 0
+			mem.zero_slice(code.char_buffer)
+		}
+	case:
+		code.memory[index] = code.reg[reg_b]
+
+	}
+
+
 }
 
 branches :: enum {
@@ -109,10 +174,12 @@ process_instr :: proc(code: ^Code) -> bool {
 		{instr_sub(code, get_args_three_reg(data))}
 	case .ADD:
 		{instr_add(code, get_args_three_reg(data))}
+	case .STR:
+		{instr_str(code, get_args_three_reg(data))}
 	case .LDI:
 		{instr_ldi(code.reg[:], get_args_imm(data))}
 	case .ADI:
-		{instr_adi(code.reg[:], get_args_imm(data))}
+		{instr_adi(code, code.reg[:], get_args_imm(data))}
 	case .HLT:
 		{
 			code.halted = true
@@ -120,6 +187,7 @@ process_instr :: proc(code: ^Code) -> bool {
 		}
 	case .JMP:
 		{instr_jmp(code, data)}
+
 
 	case .BRH:
 		{instr_brh(code, data)}
@@ -132,23 +200,28 @@ process_instr :: proc(code: ^Code) -> bool {
 	return res
 }
 
-count: u64
-process_code :: proc(code: ^Code) -> bool {
-	// fmt.println(count)
-	count += 1
-	if code.pc * 2 >= cast(u16)len(code.data) {return false}
+update_state :: proc(code: ^Code) {
 	code.reg[0] = 0
+}
+process_code :: proc(code: ^Code) -> bool {
+	if code.pc * 2 >= cast(u16)len(code.data) {return false}
+	update_state(code)
+
+
 	if !process_instr(code) {return false}
 	return true
 }
 
 Code :: struct {
-	halted: bool,
-	data:   []u8,
-	memory: []u8,
-	pc:     u16,
-	reg:    [16]u8,
-	flags:  bit_field u8 {
+	halted:         bool,
+	data:           []u8,
+	memory:         []u8,
+	char_buffer:    []u8,
+	print_buffer:   []u8,
+	char_buffer_wp: int,
+	pc:             u16,
+	reg:            [16]u8,
+	flags:          bit_field u8 {
 		Z: bool | 1,
 		C: bool | 1,
 	},
@@ -157,6 +230,7 @@ Code :: struct {
 
 emu_main :: proc(data: rawptr) {
 	code := cast(^Code)data
+
 	for !code.halted {
 		process_code(code)
 	}
@@ -173,6 +247,8 @@ load_and_run_code :: proc(path: string, code: ^Code, thread_handle: ^^thread.Thr
 main :: proc() {
 	code: Code
 	code.memory = make([]u8, 256)
+	code.char_buffer = make([]u8, 10)
+	code.print_buffer = make([]u8, 11)
 
 	if (len(os.args) != 2) {
 		fmt.eprintfln(`[ERROR] usage:
@@ -185,10 +261,14 @@ main :: proc() {
 	load_and_run_code(file, &code, &emu_thread)
 
 
-	rl.SetConfigFlags({rl.ConfigFlag.VSYNC_HINT})
-	rl.InitWindow(800, 450, "bpu")
+	rl.SetConfigFlags({rl.ConfigFlag.VSYNC_HINT, .WINDOW_RESIZABLE})
+	width: i32 = 800
+	height: i32 = 450
+	rl.InitWindow(width, height, "bpu")
 
 	for !rl.WindowShouldClose() {
+		width = rl.GetScreenWidth()
+		height = rl.GetScreenHeight()
 
 
 		if (rl.IsKeyPressed(.R)) {
@@ -202,14 +282,23 @@ main :: proc() {
 		}
 
 
+		// fmt.printf("%s\n", code.print_buffer)
 		rl.BeginDrawing()
 		if !code.halted {
 			rl.ClearBackground(rl.DARKPURPLE)
 		} else {
 			rl.ClearBackground(rl.RED)
 		}
+		rl.DrawText(
+			cstring(raw_data(code.print_buffer)),
+			0,
+			height - height / 10,
+			height / 10,
+			rl.RAYWHITE,
+		)
 		rl.EndDrawing()
 	}
 
+	code.halted = true
 	thread.join(emu_thread)
 }
