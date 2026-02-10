@@ -112,8 +112,8 @@ instr_str :: proc(code: ^Code, reg_a: u8, reg_b: u8, pseudo_reg_c: u8) {
 	index := ((cast(i16)code.reg[reg_a]) + cast(i16)offset)
 
 
-	fmt.printfln("Mem[%i + %i] <- %i", code.reg[reg_a], offset, code.reg[reg_b])
-	fmt.printfln("index: %i, reg_a: %i", index, code.reg[reg_a])
+	// fmt.printfln("Mem[%i + %i] <- %i", code.reg[reg_a], offset, code.reg[reg_b])
+	// fmt.printfln("index: %i, reg_a: %i", index, code.reg[reg_a])
 	write_char :: 247
 	buffer_chars :: 248
 	clear_chars :: 249
@@ -148,7 +148,6 @@ instr_str :: proc(code: ^Code, reg_a: u8, reg_b: u8, pseudo_reg_c: u8) {
 		{
 			x := code.memory[screen_x]
 			y := code.memory[screen_y]
-			fmt.printfln("x: %i y: %i", x, y)
 			screen_set_pixel(code.screen_buffer, cast(u32)x, cast(u32)y)
 		}
 	case clear_pixel:
@@ -323,22 +322,29 @@ get_pixel :: proc(screen: []u8, x: u32, y: u32) -> u8 {
 
 }
 draw_lamps :: proc(code: ^Code, width: u32, height: u32) {
-	lampboard_width := width - width / 10
+	lampboard_width := width // - width / 10
 	lampboard_height := height - height / 10
-	lamp_width: u32 = lampboard_width / lamps_x
-	lamp_height: u32 = lampboard_width / lamps_y
-	lampboard_width = min(lamp_width, lamp_height)
-	lampboard_height = lampboard_width
+
+	lamp_size: u32
+	{
+		lamp_width: u32 = lampboard_width / lamps_x
+		lamp_height: u32 = lampboard_height / lamps_y
+		lamp_size = min(lamp_width, lamp_height)
+
+	}
+
+	lampboard_width = lamp_size * lamps_x
+	lampboard_height = lamp_size * lamps_y
 
 
 	for y in 0 ..< lamps_y {
 		for x in 0 ..< lamps_x {
 			is_on := get_pixel(code.screen, x, y)
 			rl.DrawRectangle(
-				cast(i32)(x * lamp_width),
-				cast(i32)(y * lamp_height),
-				cast(i32)lamp_width,
-				cast(i32)lamp_height,
+				cast(i32)(x * lamp_size),
+				cast(i32)(y * lamp_size),
+				cast(i32)lamp_size,
+				cast(i32)lamp_size,
 				is_on != 0 ? rl.YELLOW : rl.BLACK,
 			)
 		}}
