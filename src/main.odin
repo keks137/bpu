@@ -108,13 +108,21 @@ push_char_buffer :: proc(char_buffer: []u8, display_buffer: []u8) {
 }
 
 instr_str :: proc(code: ^Code, reg_a: u8, reg_b: u8, pseudo_reg_c: u8) {
-	offset := cast(i8)pseudo_reg_c
+	offset := cast(i16)(pseudo_reg_c ~ 8) - 8
 	index := ((cast(i16)code.reg[reg_a]) + cast(i16)offset)
 
 
+	fmt.printfln("Mem[%i + %i] <- %i", code.reg[reg_a], offset, code.reg[reg_b])
+	fmt.printfln("index: %i, reg_a: %i", index, code.reg[reg_a])
 	write_char :: 247
 	buffer_chars :: 248
 	clear_chars :: 249
+	screen_x :: 240
+	screen_y :: 241
+	draw_pixel :: 242
+	clear_pixel :: 243
+	buffer_screen :: 245
+	clear_screen :: 246
 	switch index {
 	case write_char:
 		{
@@ -132,6 +140,28 @@ instr_str :: proc(code: ^Code, reg_a: u8, reg_b: u8, pseudo_reg_c: u8) {
 			code.char_buffer_wp = 0
 			mem.zero_slice(code.char_buffer)
 		}
+	case buffer_screen:
+		{
+			code.screen = code.screen_buffer
+		}
+	case draw_pixel:
+		{
+			x := code.memory[screen_x]
+			y := code.memory[screen_y]
+			fmt.printfln("x: %i y: %i", x, y)
+			screen_set_pixel(code.screen_buffer, cast(u32)x, cast(u32)y)
+		}
+	case clear_pixel:
+		{
+			x := code.memory[screen_x]
+			y := code.memory[screen_y]
+			screen_clear_pixel(code.screen_buffer, cast(u32)x, cast(u32)y)
+		}
+	case clear_screen:
+		{
+			mem.zero_slice(code.screen_buffer)
+		}
+
 	case:
 		code.memory[index] = code.reg[reg_b]
 
@@ -193,6 +223,7 @@ process_instr :: proc(code: ^Code) -> bool {
 		{instr_brh(code, data)}
 	case:
 		fmt.printfln("%s not implemented", instr)
+		os.exit(1)
 	}
 
 
@@ -212,6 +243,19 @@ process_code :: proc(code: ^Code) -> bool {
 	return true
 }
 
+
+Buttons :: bit_field u8 {
+	start:  bool | 1,
+	select: bool | 1,
+	a:      bool | 1,
+	b:      bool | 1,
+	up:     bool | 1,
+	right:  bool | 1,
+	down:   bool | 1,
+	left:   bool | 1,
+}
+
+
 Code :: struct {
 	halted:         bool,
 	data:           []u8,
@@ -225,6 +269,9 @@ Code :: struct {
 		Z: bool | 1,
 		C: bool | 1,
 	},
+	screen_buffer:  []u8,
+	screen:         []u8,
+	buttons:        Buttons,
 }
 
 
@@ -253,11 +300,57 @@ load_and_run_code :: proc(path: string, code: ^Code, thread_handle: ^^thread.Thr
 	thread_handle^ = thread.create_and_start_with_data(code, emu_main)
 }
 
+
+lamps_x: u32 : 32
+lamps_y: u32 : 32
+
+
+screen_set_pixel :: proc(screen: []u8, x: u32, y: u32) {
+	idx := y * lamps_x + x
+	screen[idx >> 3] |= 1 << (idx & 7)
+}
+
+screen_clear_pixel :: proc(screen: []u8, x: u32, y: u32) {
+	idx := y * lamps_x + x
+	screen[idx >> 3] &= ~(1 << (idx & 7))
+}
+
+get_pixel :: proc(screen: []u8, x: u32, y: u32) -> u8 {
+	index: u32 = x + lamps_x * y
+	return screen[index >> 3] >> (index & 7) & 1
+
+}
+draw_lamps :: proc(code: ^Code, width: u32, height: u32) {
+	lampboard_width := width - width / 10
+	lampboard_height := height - height / 10
+	lamp_width: u32 = lampboard_width / lamps_x
+	lamp_height: u32 = lampboard_width / lamps_y
+	lampboard_width = min(lamp_width, lamp_height)
+	lampboard_height = lampboard_width
+
+
+	for y in 0 ..< lamps_y {
+		for x in 0 ..< lamps_x {
+			is_on := get_pixel(code.screen, x, y)
+			rl.DrawRectangle(
+				cast(i32)(x * lamp_width),
+				cast(i32)(y * lamp_height),
+				cast(i32)lamp_width,
+				cast(i32)lamp_height,
+				is_on != 0 ? rl.YELLOW : rl.BLACK,
+			)
+		}}
+
+
+}
+
 main :: proc() {
 	code: Code
 	code.memory = make([]u8, 256)
 	code.char_buffer = make([]u8, 10)
 	code.print_buffer = make([]u8, 11)
+	code.screen = make([]u8, 128)
+	code.screen_buffer = make([]u8, 128)
 
 	file: string
 	if (len(os.args) < 2) {
@@ -289,6 +382,9 @@ main :: proc() {
 
 
 		}
+		if (rl.IsKeyPressed(.UP)) {
+			code.buttons.up = true
+		}
 
 
 		// fmt.printf("%s\n", code.print_buffer)
@@ -298,6 +394,8 @@ main :: proc() {
 		} else {
 			rl.ClearBackground(rl.RED)
 		}
+
+
 		rl.DrawText(
 			cstring(raw_data(code.print_buffer)),
 			0,
@@ -305,6 +403,7 @@ main :: proc() {
 			height / 10,
 			rl.RAYWHITE,
 		)
+		draw_lamps(&code, cast(u32)width, cast(u32)height)
 		rl.EndDrawing()
 	}
 
