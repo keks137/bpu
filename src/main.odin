@@ -272,6 +272,8 @@ Code :: struct {
 	screen_buffer:  []u8,
 	screen:         []u8,
 	buttons:        Buttons,
+	stack:          []u16,
+	stack_top:      u16,
 }
 
 
@@ -351,6 +353,7 @@ main :: proc() {
 	code.print_buffer = make([]u8, 11)
 	code.screen = make([]u8, 128)
 	code.screen_buffer = make([]u8, 128)
+	code.stack = make([]u16, 16)
 
 	file: string
 	if (len(os.args) < 2) {

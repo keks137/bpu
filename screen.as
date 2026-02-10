@@ -19,6 +19,13 @@ define controller_inp 7
 
 LDI r15 base_devices_pointer
 
+
+LDI r1 "H"
+STR r15 r1 put_char
+LDI r1 "I"
+STR r15 r1 put_char
+STR r15 r0 push_chars
+
 LDI r1 1
 STR r15 r1 px
 STR r15 r1 py
