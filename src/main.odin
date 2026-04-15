@@ -287,7 +287,7 @@ emu_main :: proc(data: rawptr) {
 
 load_and_run_code :: proc(path: string, code: ^Code, thread_handle: ^^thread.Thread) {
 	err: os.Error
-	code.data, err = os.read_entire_file_or_err(path)
+	code.data, err = os.read_entire_file(path,context.allocator)
 	if err != nil {
 		help := ""
 		if err == .ENOENT {
