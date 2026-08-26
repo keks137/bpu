@@ -1,13 +1,4 @@
 package main
-
-import "core:fmt"
-import "core:mem"
-import "core:os"
-import "core:sync"
-import "core:thread"
-import rl "vendor:raylib"
-
-
 ops :: enum {
 	NOP = 0,
 	HLT = 1,
@@ -287,7 +278,7 @@ emu_main :: proc(data: rawptr) {
 
 load_and_run_code :: proc(path: string, code: ^Code, thread_handle: ^^thread.Thread) {
 	err: os.Error
-	code.data, err = os.read_entire_file(path,context.allocator)
+	code.data, err = os.read_entire_file(path, context.allocator)
 	if err != nil {
 		help := ""
 		if err == .ENOENT {
@@ -419,3 +410,9 @@ main :: proc() {
 	code.halted = true
 	thread.join(emu_thread)
 }
+import "core:fmt"
+import "core:mem"
+import "core:os"
+import "core:sync"
+import "core:thread"
+import rl "vendor:raylib"
