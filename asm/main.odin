@@ -66,6 +66,7 @@ is_reg :: proc(kind: TokenKind) -> (val: u8, ok: bool) {
 	}
 	return
 }
+
 parse_val8 :: proc(p: ^Parser) -> (val: u8) {
 	#partial switch p.curr.kind {
 	case .Number:
@@ -87,6 +88,28 @@ parse_val8 :: proc(p: ^Parser) -> (val: u8) {
 	}
 	return
 }
+parse_cond :: proc(p: ^Parser) -> (cond: Cond) {
+	#partial switch p.curr.kind {
+	case .Ident:
+		iden := advance_token(p)
+		switch iden.text {
+		case "zero":
+			cond = .EQ
+		case "notzero":
+			cond = .NE
+		case "carry":
+			cond = .GE
+		case "notcarry":
+			cond = .LT
+		case:
+			syntax_error(&p.tok, p.curr.pos, "expected a condition, got '%s'", p.curr.text)
+		}
+	case:
+		syntax_error(&p.tok, p.curr.pos, "expected a condition, got '%s'", p.curr.text)
+
+	}
+	return
+}
 parse_stmt :: proc(p: ^Parser) {
 	#partial switch p.curr.kind {
 	case .Ldi:
@@ -100,7 +123,7 @@ parse_stmt :: proc(p: ^Parser) {
 			op[1] |= num
 			write_op(p, op[:])
 		} else {
-			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", reg.text)
+			syntax_error(&p.tok, reg.pos, "expected a register, got '%s'", reg.text)
 		}
 	case .Adi:
 		advance_token(p)
@@ -140,7 +163,16 @@ parse_stmt :: proc(p: ^Parser) {
 		} else {
 			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", rega.text)
 		}
-
+	case .Brh:
+		advance_token(p)
+		op := [2]u8{}
+		op[0] |= u8(Ops.BRH) << 4
+		cond := parse_cond(p)
+		op[0] |= u8(cond) << 2
+		val := parse_val10(p)
+		op[0] |= u8((val >> 8) & 0b11)
+		op[1] |= u8(val)
+		write_op(p, op[:])
 	case .Hlt:
 		advance_token(p)
 		write_op(p, {u8(Ops.HLT) << 4, 0})
@@ -498,7 +530,7 @@ get_token :: proc(t: ^Tokenizer) -> (token: Token) {
 		syntax_error(t, token.pos, "invalid character found: %q", ch)
 	}
 	#partial switch token.kind {
-	case .Number, .Label, .Hlt, .Nop:
+	case .Number, .Label, .Hlt, .Nop, .Ident:
 		t.insert_semicolon = true
 	case:
 		t.insert_semicolon = false
