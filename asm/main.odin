@@ -8,6 +8,7 @@ main :: proc() {
 	}
 	file_data := strings.to_lower(string(file))
 	p := Parser{}
+	define_builtins(&p)
 	p.file_data = transmute([]u8)file_data
 	p.tok.filename = in_file
 	p.tok.data = file_data
@@ -22,6 +23,24 @@ main :: proc() {
 		fmt.eprintln(out_file, ":", err)
 		os.exit(1)
 	}
+}
+define_builtins :: proc(p: ^Parser) {
+	p.defines["pixel_x"] = 240
+	p.defines["pixel_y"] = 241
+	p.defines["draw_pixel"] = 242
+	p.defines["clear_pixel"] = 243
+	p.defines["load_pixel"] = 244
+	p.defines["buffer_screen"] = 245
+	p.defines["clear_screen_buffer"] = 246
+	p.defines["write_char"] = 247
+	p.defines["buffer_chars"] = 248
+	p.defines["clear_chars_buffer"] = 249
+	p.defines["show_number"] = 250
+	p.defines["clear_number"] = 251
+	p.defines["signed_mode"] = 252
+	p.defines["unsigned_mode"] = 253
+	p.defines["rng"] = 254
+	p.defines["controller_input"] = 255
 }
 write_op :: proc(p: ^Parser, op: []u8) {
 	assert(len(op) == 2)
@@ -102,28 +121,11 @@ parse_val8 :: proc(p: ^Parser) -> (val: u8) {
 		val = char_to_8(char)
 	case .Ident:
 		iden := advance_token(p)
-		tok, ok := p.defines[iden.text]
-		#partial switch tok.kind {
-		case .Number:
-			num := tok
-			val_int, ok := strconv.parse_int(num.text)
-			if ok {
-				val = u8(val_int)
-			} else {
-				syntax_error(&p.tok, num.pos, "not a valid number: '%s'", num.text)
-			}
-		case .Char:
-			val = char_to_8(tok)
-		case:
-			syntax_error(
-				&p.tok,
-				iden.pos,
-				"%s is a %s, which is not allowed here",
-				iden.text,
-				token_names[tok.kind],
-			)
-
+		val16, ok := p.defines[iden.text]
+		if !ok {
+			syntax_error(&p.tok, p.curr.pos, "%s is undefined", iden.text)
 		}
+		val = u8(val16)
 	case:
 		syntax_error(
 			&p.tok,
@@ -166,7 +168,12 @@ parse_stmt :: proc(p: ^Parser) {
 			#partial switch p.curr.kind {
 			case .Number:
 				num := advance_token(p)
-				p.defines[iden.text] = num
+				val_int, ok := strconv.parse_int(num.text)
+				if ok {
+					p.defines[iden.text] = i16(val_int)
+				} else {
+					syntax_error(&p.tok, num.pos, "not a valid number: '%s'", num.text)
+				}
 			case:
 				syntax_error(
 					&p.tok,
@@ -213,6 +220,30 @@ parse_stmt :: proc(p: ^Parser) {
 	case .Label:
 		lbl := advance_token(p)
 		p.labels[lbl.text] = p.ip
+	case .Dec:
+		inc := advance_token(p)
+		if regval, ok := is_reg(p.curr.kind); ok {
+			advance_token(p)
+			op := [2]u8{}
+			op[0] |= u8(Ops.ADI) << 4
+			op[0] |= regval
+			val :=int(-1)
+			op[1] |= u8(val)
+			write_op(p, op[:])
+		} else {
+			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", p.curr.text)
+		}
+	case .Inc:
+		inc := advance_token(p)
+		if regval, ok := is_reg(p.curr.kind); ok {
+			advance_token(p)
+			op := [2]u8{}
+			op[0] |= u8(Ops.ADI) << 4
+			op[0] |= regval
+			op[1] |= 1
+		} else {
+			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", p.curr.text)
+		}
 	case .Nop:
 		advance_token(p)
 		write_op(p, {0, 0})
@@ -222,8 +253,10 @@ parse_stmt :: proc(p: ^Parser) {
 		regb := advance_token(p)
 		if regaval, ok := is_reg(rega.kind); ok {
 			if regbval, ok := is_reg(regb.kind); ok {
-				offset := parse_val8(p)
-				fmt.println("off:", offset)
+				offset := u8(0)
+				if p.curr.kind != .Semicolon {
+					offset = parse_val8(p)
+				}
 				op := [2]u8{}
 				op[0] |= u8(Ops.STR) << 4
 				op[0] |= regaval
@@ -429,7 +462,7 @@ Parser :: struct {
 	curr:      Token,
 	out:       [dynamic]u8,
 	labels:    map[string]u16,
-	defines:   map[string]Token,
+	defines:   map[string]i16,
 	ip:        u16,
 }
 next_rune :: proc(t: ^Tokenizer) -> rune {
@@ -606,7 +639,7 @@ get_token :: proc(t: ^Tokenizer) -> (token: Token) {
 		syntax_error(t, token.pos, "invalid character found: %q", ch)
 	}
 	#partial switch token.kind {
-	case .Number, .Label, .Hlt, .Nop, .Ident, .Char:
+	case .Number, .Label, .Hlt, .Nop, .Ident, .Char, .R0 ..= .R15:
 		t.insert_semicolon = true
 	case:
 		t.insert_semicolon = false
