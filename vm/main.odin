@@ -207,8 +207,7 @@ process_instr :: proc(code: ^Code) -> bool {
 		}
 	case .JMP:
 		{instr_jmp(code, data)}
-
-
+	case .NOP:
 	case .BRH:
 		{instr_brh(code, data)}
 	case:
