@@ -11,6 +11,7 @@ main :: proc() {
 	p.file_data = transmute([]u8)file_data
 	p.tok.filename = in_file
 	p.tok.data = file_data
+	p.tok.pos.line = 1
 	next_rune(&p.tok)
 	advance_token(&p)
 	parse_file(&p)
@@ -89,7 +90,7 @@ parse_val8 :: proc(p: ^Parser) -> (val: u8) {
 parse_stmt :: proc(p: ^Parser) {
 	#partial switch p.curr.kind {
 	case .Ldi:
-		ldi := advance_token(p)
+		advance_token(p)
 		reg := advance_token(p)
 		if regval, ok := is_reg(reg.kind); ok {
 			num := parse_val8(p)
@@ -97,11 +98,23 @@ parse_stmt :: proc(p: ^Parser) {
 			op[0] |= u8(Ops.LDI) << 4
 			op[0] |= regval
 			op[1] |= num
-
+			write_op(p, op[:])
 		} else {
 			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", reg.text)
 		}
-
+	case .Adi:
+		advance_token(p)
+		reg := advance_token(p)
+		if regval, ok := is_reg(reg.kind); ok {
+			num := parse_val8(p)
+			op := [2]u8{}
+			op[0] |= u8(Ops.ADI) << 4
+			op[0] |= regval
+			op[1] |= num
+			write_op(p, op[:])
+		} else {
+			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", reg.text)
+		}
 	case .Label:
 		lbl := advance_token(p)
 		p.labels[lbl.text] = p.ip
@@ -110,16 +123,22 @@ parse_stmt :: proc(p: ^Parser) {
 		write_op(p, {0, 0})
 	case .Str:
 		str := advance_token(p)
-		reg := advance_token(p)
-		if regval, ok := is_reg(reg.kind); ok {
-			num := parse_val8(p)
-			op := [2]u8{}
-			op[0] |= u8(Ops.LDI) << 4
-			op[0] |= regval
-			op[1] |= num
-
+		rega := advance_token(p)
+		regb := advance_token(p)
+		if regaval, ok := is_reg(rega.kind); ok {
+			if regbval, ok := is_reg(regb.kind); ok {
+				offset := parse_val8(p)
+				op := [2]u8{}
+				op[0] |= u8(Ops.STR) << 4
+				op[0] |= regaval
+				op[1] |= regbval << 4
+				op[1] |= offset
+				write_op(p, op[:])
+			} else {
+				syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", regb.text)
+			}
 		} else {
-			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", reg.text)
+			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", rega.text)
 		}
 
 	case .Hlt:
