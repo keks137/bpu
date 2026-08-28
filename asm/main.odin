@@ -227,7 +227,7 @@ parse_stmt :: proc(p: ^Parser) {
 			op := [2]u8{}
 			op[0] |= u8(Ops.ADI) << 4
 			op[0] |= regval
-			val :=int(-1)
+			val := int(-1)
 			op[1] |= u8(val)
 			write_op(p, op[:])
 		} else {
@@ -247,6 +247,35 @@ parse_stmt :: proc(p: ^Parser) {
 	case .Nop:
 		advance_token(p)
 		write_op(p, {0, 0})
+	case .Sub:
+		advance_token(p)
+		rega := advance_token(p)
+		if regaval, ok := is_reg(rega.kind); ok {
+			regb := advance_token(p)
+			if regbval, ok := is_reg(regb.kind); ok {
+				regc := advance_token(p)
+				if regcval, ok := is_reg(regc.kind); ok {
+					offset := u8(0)
+					if p.curr.kind != .Semicolon {
+						offset = parse_val8(p)
+					}
+					op := [2]u8{}
+					op[0] |= u8(Ops.SUB) << 4
+					op[0] |= regaval
+					op[1] |= regbval << 4
+					op[1] |= regcval
+					write_op(p, op[:])
+				} else {
+					syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", regb.text)
+				}
+			} else {
+				syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", regb.text)
+			}
+		} else {
+			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", rega.text)
+		}
+
+
 	case .Str:
 		str := advance_token(p)
 		rega := advance_token(p)
