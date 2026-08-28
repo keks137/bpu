@@ -67,6 +67,26 @@ is_reg :: proc(kind: TokenKind) -> (val: u8, ok: bool) {
 	return
 }
 
+
+char_to_8 :: proc(tok: Token) -> (val: u8) {
+	assert(tok.kind == .Char)
+	switch tok.text[1] {
+	case ' ':
+		val = 0
+	case 'a' ..= 'z':
+		val = u8(tok.text[1]) - 96
+	case 'A' ..= 'Z':
+		val = u8(tok.text[1]) - 64
+	case '.':
+		val = 27
+	case '!':
+		val = 28
+	case '?':
+		val = 29
+	}
+	return
+}
+
 parse_val8 :: proc(p: ^Parser) -> (val: u8) {
 	#partial switch p.curr.kind {
 	case .Number:
@@ -75,7 +95,34 @@ parse_val8 :: proc(p: ^Parser) -> (val: u8) {
 		if ok {
 			val = u8(val_int)
 		} else {
-			syntax_error(&p.tok, num.pos, "not a valid number: %s", num.text)
+			syntax_error(&p.tok, num.pos, "not a valid number: '%s'", num.text)
+		}
+	case .Char:
+		char := advance_token(p)
+		val = char_to_8(char)
+	case .Ident:
+		iden := advance_token(p)
+		tok, ok := p.defines[iden.text]
+		#partial switch tok.kind {
+		case .Number:
+			num := tok
+			val_int, ok := strconv.parse_int(num.text)
+			if ok {
+				val = u8(val_int)
+			} else {
+				syntax_error(&p.tok, num.pos, "not a valid number: '%s'", num.text)
+			}
+		case .Char:
+			val = char_to_8(tok)
+		case:
+			syntax_error(
+				&p.tok,
+				iden.pos,
+				"%s is a %s, which is not allowed here",
+				iden.text,
+				token_names[tok.kind],
+			)
+
 		}
 	case:
 		syntax_error(
@@ -112,6 +159,31 @@ parse_cond :: proc(p: ^Parser) -> (cond: Cond) {
 }
 parse_stmt :: proc(p: ^Parser) {
 	#partial switch p.curr.kind {
+	case .Define:
+		def := advance_token(p)
+		if p.curr.kind == .Ident {
+			iden := advance_token(p)
+			#partial switch p.curr.kind {
+			case .Number:
+				num := advance_token(p)
+				p.defines[iden.text] = num
+			case:
+				syntax_error(
+					&p.tok,
+					p.curr.pos,
+					"expected something that '%s' could be defined to, got '%s'",
+					iden.text,
+					p.curr.text,
+				)
+			}
+		} else {
+			syntax_error(
+				&p.tok,
+				p.curr.pos,
+				"expected an identifier for define, got '%s'",
+				p.curr.text,
+			)
+		}
 	case .Ldi:
 		advance_token(p)
 		reg := advance_token(p)
@@ -151,11 +223,12 @@ parse_stmt :: proc(p: ^Parser) {
 		if regaval, ok := is_reg(rega.kind); ok {
 			if regbval, ok := is_reg(regb.kind); ok {
 				offset := parse_val8(p)
+				fmt.println("off:", offset)
 				op := [2]u8{}
 				op[0] |= u8(Ops.STR) << 4
 				op[0] |= regaval
 				op[1] |= regbval << 4
-				op[1] |= offset
+				op[1] |= (offset) & 0b1111
 				write_op(p, op[:])
 			} else {
 				syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", regb.text)
@@ -203,6 +276,7 @@ parse_stmt :: proc(p: ^Parser) {
 parse_file :: proc(p: ^Parser) {
 	for {
 		if p.curr.kind == .EOF {break}
+		if p.tok.error_count > 10 {break}
 		parse_stmt(p)
 	}
 }
@@ -355,6 +429,7 @@ Parser :: struct {
 	curr:      Token,
 	out:       [dynamic]u8,
 	labels:    map[string]u16,
+	defines:   map[string]Token,
 	ip:        u16,
 }
 next_rune :: proc(t: ^Tokenizer) -> rune {
@@ -501,6 +576,7 @@ get_token :: proc(t: ^Tokenizer) -> (token: Token) {
 
 	case '"':
 		token.kind = .Char
+		next_rune(t)
 		if t.ch != '"' {
 			syntax_error(t, token.pos, "expected '\"'")
 		} else {
@@ -530,7 +606,7 @@ get_token :: proc(t: ^Tokenizer) -> (token: Token) {
 		syntax_error(t, token.pos, "invalid character found: %q", ch)
 	}
 	#partial switch token.kind {
-	case .Number, .Label, .Hlt, .Nop, .Ident:
+	case .Number, .Label, .Hlt, .Nop, .Ident, .Char:
 		t.insert_semicolon = true
 	case:
 		t.insert_semicolon = false
