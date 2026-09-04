@@ -241,6 +241,7 @@ parse_stmt :: proc(p: ^Parser) {
 			op[0] |= u8(Ops.ADI) << 4
 			op[0] |= regval
 			op[1] |= 1
+			write_op(p, op[:])
 		} else {
 			syntax_error(&p.tok, p.curr.pos, "expected a register, got '%s'", p.curr.text)
 		}
@@ -550,12 +551,6 @@ get_token :: proc(t: ^Tokenizer) -> (token: Token) {
 			}
 		}
 	}
-
-	scan_escape :: proc(t: ^Tokenizer) {
-		// TODO(bill): scan_escape
-	}
-
-
 	skip_whitespace(t)
 
 	token.pos = t.pos
